@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
@@ -9,58 +8,46 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Comprehensive Health Status Predictor", layout="wide")
+st.set_page_config(page_title="Health Status Predictor", layout="wide")
 
-# --------- Step 1: Data preparation ---------
-def recompute_score(row):
-    bmi = row['Weight_kg'] / ((row['Height_cm'] / 100) ** 2)
-    score = 100 - (bmi - 22)**2 - abs(row['BP_Systolic'] - 120)/2 - (row['Cholesterol_mg_dL'] - 180)/5
-    if row['ActivityLevel'] == "Very Active":
-        score += 5
-    elif row['ActivityLevel'] == "Moderately Active":
-        score += 2
-    if row['DietType'] == "Balanced":
-        score += 3
-    return max(0, min(100, round(score, 1)))
-
-def categorize_health(score):
-    if score >= 80:
-        return "Healthy and Fit"
-    elif score >= 60:
-        return "Moderate"
-    else:
-        return "Unhealthy and Not Fit"
-
-def prepare_dataset():
-    if not os.path.exists("health_tracker_500_clean.csv"):
-        df = pd.read_csv("health_tracker_500.csv")
-        df['HealthScore'] = df.apply(recompute_score, axis=1)
-        df['HealthyStatus'] = df['HealthScore'].apply(categorize_health)
-        df.to_csv("health_tracker_500_clean.csv", index=False)
-        print("Clean dataset created: health_tracker_500_clean.csv")
-    return pd.read_csv("health_tracker_500_clean.csv")
-
-# --------- Step 2: Model training ---------
+# --------- Step 1: Load data & add Healthy/Unhealthy label ---------
 @st.cache_data(show_spinner=True)
 def load_and_prepare_data():
-    df = prepare_dataset()
+    df = pd.read_csv("health_tracker_500.csv")
+
+    # Define health categories
+    healthy_bmi = ['Normal', 'Underweight']
+    healthy_bp = ['Normal', 'Elevated']
+    healthy_chol = ['Desirable', 'Borderline']
+
+    df['HealthyStatus'] = np.where(
+        (df['BMI_Category'].isin(healthy_bmi)) &
+        (df['BP_Category'].isin(healthy_bp)) &
+        (df['Cholesterol_Category'].isin(healthy_chol)),
+        'Healthy and Fit',
+        'Unhealthy and Not Fit'
+    )
     return df
 
+# --------- Step 2: Train model ---------
 @st.cache_resource(show_spinner=True)
 def train_model(df):
     features = [
         'Height_cm', 'Weight_kg', 'BMI', 'BP_Systolic', 'BP_Diastolic', 
-        'Cholesterol_mg_dL', 'ActivityLevel', 'DietType', 'HealthScore'
+        'Cholesterol_mg_dL', 'ActivityLevel', 'DietType'
     ]
     target = 'HealthyStatus'
+
     encoders = {}
     for col in ['ActivityLevel', 'DietType']:
         le = LabelEncoder()
         df[col] = le.fit_transform(df[col])
         encoders[col] = le
+
     target_le = LabelEncoder()
     df[target] = target_le.fit_transform(df[target])
     encoders['target'] = target_le
+
     X = df[features]
     y = df[target]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -83,49 +70,12 @@ def preprocess_input(input_df, encoders, features):
             input_df[col] = 0
     return input_df[features]
 
-# --------- HealthScore calculation ---------
-def calculate_health_score(height, weight, bp_sys, cholesterol, activity, diet):
-    bmi = weight / ((height / 100) ** 2)
-    score = 100 - (bmi - 22)**2 - abs(bp_sys - 120)/2 - (cholesterol - 180)/5
-    if activity == "Very Active":
-        score += 5
-    elif activity == "Moderately Active":
-        score += 2
-    if diet == "Balanced":
-        score += 3
-    return max(0, min(100, round(score, 1))), round(bmi, 1)
-
-def categorize_health(score):
-    if score >= 80:
-        return "Healthy and Fit"
-    elif score >= 60:
-        return "Moderate"
-    else:
-        return "Unhealthy and Not Fit"
-
-def health_score_gauge(score):
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number",
-        value = score,
-        title = {'text': "Health Score"},
-        gauge = {
-            'axis': {'range': [0,100]},
-            'bar': {'color': "darkblue"},
-            'steps': [
-                {'range': [0,60], 'color': "red"},
-                {'range': [60,80], 'color': "orange"},
-                {'range': [80,100], 'color': "green"}
-            ]
-        }
-    ))
-    return fig
-
 # --------- Streamlit UI ---------
 def main():
-    st.title("Comprehensive Health Status Predictor")
+    st.title("Health Status Predictor")
     st.markdown("""
-        This app predicts if a person is **Healthy and Fit**, **Moderate**, or **Unhealthy and Not Fit**  
-        using BMI, blood pressure, cholesterol, diet, activity, and an auto‑calculated health score.
+        This app predicts whether a person is **Healthy and Fit** or **Unhealthy and Not Fit**  
+        using BMI, blood pressure, cholesterol, activity, and diet.
     """)
 
     df = load_and_prepare_data()
@@ -143,10 +93,10 @@ def main():
         activity = st.selectbox("Activity Level", ["Sedentary", "Lightly Active", "Moderately Active", "Very Active"])
         diet = st.selectbox("Diet Type", ["Balanced", "High Protein", "High Carb", "Keto", "Vegetarian"])
 
-        if st.button("Predict"):
-            health_score, bmi = calculate_health_score(height, weight, bp_sys, cholesterol, activity, diet)
-            health_category = categorize_health(health_score)
+        # Calculate BMI
+        bmi = round(weight / ((height / 100) ** 2), 1)
 
+        if st.button("Predict"):
             input_data = {
                 'Height_cm': height,
                 'Weight_kg': weight,
@@ -155,8 +105,7 @@ def main():
                 'BP_Diastolic': bp_dia,
                 'Cholesterol_mg_dL': cholesterol,
                 'ActivityLevel': activity,
-                'DietType': diet,
-                'HealthScore': health_score
+                'DietType': diet
             }
             input_df = pd.DataFrame([input_data])
             input_encoded = preprocess_input(input_df, encoders, features)
@@ -166,25 +115,18 @@ def main():
             prob = proba[pred]
 
             # Color coding
-            if health_category == "Healthy and Fit":
-                color = "green"
-            elif health_category == "Moderate":
-                color = "orange"
-            else:
-                color = "red"
+            color = "green" if class_name == "Healthy and Fit" else "red"
 
             st.markdown(
                 f"""
                 <div style="background-color:{color};padding:15px;border-radius:10px">
-                    <h3 style="color:white;">Prediction: {health_category}</h3>
+                    <h3 style="color:white;">Prediction: {class_name}</h3>
                     <p style="color:white;">Confidence: {prob:.2%}</p>
                     <p style="color:white;">Your BMI: {bmi}</p>
-                    <p style="color:white;">Your Health Score: {health_score}</p>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
-            st.plotly_chart(health_score_gauge(health_score))
 
     else:
         st.header("Batch prediction by uploading CSV file")
@@ -194,11 +136,14 @@ def main():
             st.write("Data preview:")
             st.dataframe(batch_df.head())
 
-            # Recalculate HealthScore & category for batch
-            batch_df['HealthScore'] = batch_df.apply(
-                lambda row: recompute_score(row), axis=1
-            )
-            batch_df['Prediction'] = batch_df['HealthScore'].apply(categorize_health)
+            input_encoded = preprocess_input(batch_df.copy(), encoders, features)
+            preds = model.predict(input_encoded)
+            probas = model.predict_proba(input_encoded)
+            pred_labels = target_le.inverse_transform(preds)
+            pred_probas = [probas[i][preds[i]] for i in range(len(preds))]
+
+            batch_df['Prediction'] = pred_labels
+            batch_df['Confidence'] = pred_probas
 
             st.subheader("Prediction Results:")
             st.dataframe(batch_df)
@@ -208,11 +153,12 @@ def main():
 
             st.subheader("Prediction Distribution")
             fig, ax = plt.subplots()
-            sns.countplot(x='Prediction', data=batch_df, order=["Unhealthy and Not Fit","Moderate","Healthy and Fit"], ax=ax)
+            sns.countplot(x='Prediction', data=batch_df, order=target_le.classes_, ax=ax)
             st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
+
 
 
 # ------------------------------------
