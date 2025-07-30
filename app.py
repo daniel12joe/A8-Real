@@ -33,7 +33,7 @@ def load_and_prepare_data():
 @st.cache_resource(show_spinner=True)
 def train_model(df):
     features = [
-        'Height_cm', 'Weight_kg', 'BMI', 'BP_Systolic', 'BP_Diastolic', 
+        'Height_cm', 'Weight_kg', 'BMI', 'BP_Systolic', 'BP_Diastolic',
         'Cholesterol_mg_dL', 'ActivityLevel', 'DietType'
     ]
     target = 'HealthyStatus'
@@ -88,6 +88,35 @@ def bmi_gauge(bmi):
         }
     ))
     return fig
+
+# --------- Helper: Radar Chart ---------
+def radar_chart(user_data):
+    categories = list(user_data.keys())
+    values = list(user_data.values())
+    healthy_ranges = [22, 70, 120, 80, 180]  # Ideal values (BMI, Weight, BP Sys, BP Dia, Cholesterol)
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name='User'))
+    fig.add_trace(go.Scatterpolar(r=healthy_ranges, theta=categories, fill='toself', name='Ideal', line_color='green'))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=True)
+    return fig
+
+# --------- Helper: Generate health tips ---------
+def generate_tips(bmi, bp_sys, bp_dia, chol, activity):
+    tips = []
+    if bmi > 25:
+        tips.append("Maintain a balanced diet and increase daily physical activity.")
+    elif bmi < 18.5:
+        tips.append("Include calorie-rich, nutritious foods to reach a healthy weight.")
+    if bp_sys > 130 or bp_dia > 85:
+        tips.append("Reduce sodium intake and monitor your blood pressure regularly.")
+    if chol > 200:
+        tips.append("Limit saturated fats and include fiber-rich foods.")
+    if activity in ["Sedentary", "Lightly Active"]:
+        tips.append("Incorporate at least 30 minutes of exercise 5 days a week.")
+    if not tips:
+        tips.append("Keep up the good work! Maintain your healthy habits.")
+    return tips
 
 # --------- Streamlit UI ---------
 def main():
@@ -146,8 +175,36 @@ def main():
                 """,
                 unsafe_allow_html=True
             )
-            # Add BMI gauge
+
+            # Parameter analysis
+            st.subheader("Why this prediction?")
+            reasons = []
+            if bmi >= 25: reasons.append("High BMI")
+            if bp_sys >= 130 or bp_dia >= 85: reasons.append("Elevated Blood Pressure")
+            if cholesterol >= 200: reasons.append("High Cholesterol")
+            if activity in ["Sedentary", "Lightly Active"]: reasons.append("Low Activity Level")
+            if reasons:
+                st.write("**Contributing factors:** " + ", ".join(reasons))
+            else:
+                st.write("All key health parameters are within healthy ranges.")
+
+            # Health tips
+            st.subheader("Personalized Health Tips")
+            tips = generate_tips(bmi, bp_sys, bp_dia, cholesterol, activity)
+            for t in tips:
+                st.markdown(f"- {t}")
+
+            # Visuals
+            st.subheader("Visual Analysis")
             st.plotly_chart(bmi_gauge(bmi))
+            radar_data = {
+                "BMI": bmi,
+                "Weight": weight,
+                "BP Systolic": bp_sys,
+                "BP Diastolic": bp_dia,
+                "Cholesterol": cholesterol
+            }
+            st.plotly_chart(radar_chart(radar_data))
 
     else:
         st.header("Batch prediction by uploading CSV file")
@@ -186,14 +243,11 @@ def main():
                 ax2.set_title(f"Distribution of {feature}")
                 st.pyplot(fig2)
 
-if __name__ == "__main__":
-    main()
-
-
-
-
 # ------------------------------------
 # Footer
 # ------------------------------------
 st.markdown("---")
-st.caption("Built with ❤️ using Streamlit, scikit-learn, and Prophet - By: Daniel Joe Gasper ")
+st.caption("Built with ❤️ using Streamlit & scikit-learn - By: Daniel Joe Gasper")
+
+if __name__ == "__main__":
+    main()
