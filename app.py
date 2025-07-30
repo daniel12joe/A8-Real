@@ -70,6 +70,25 @@ def preprocess_input(input_df, encoders, features):
             input_df[col] = 0
     return input_df[features]
 
+# --------- Helper: BMI Gauge ---------
+def bmi_gauge(bmi):
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = bmi,
+        title = {'text': "BMI"},
+        gauge = {
+            'axis': {'range': [10, 40]},
+            'steps': [
+                {'range': [10, 18.5], 'color': "blue"},
+                {'range': [18.5, 24.9], 'color': "green"},
+                {'range': [25, 29.9], 'color': "orange"},
+                {'range': [30, 40], 'color': "red"}
+            ],
+            'bar': {'color': "darkblue"}
+        }
+    ))
+    return fig
+
 # --------- Streamlit UI ---------
 def main():
     st.title("Health Status Predictor")
@@ -127,6 +146,8 @@ def main():
                 """,
                 unsafe_allow_html=True
             )
+            # Add BMI gauge
+            st.plotly_chart(bmi_gauge(bmi))
 
     else:
         st.header("Batch prediction by uploading CSV file")
@@ -151,13 +172,23 @@ def main():
             csv = batch_df.to_csv(index=False).encode()
             st.download_button("Download Results CSV", data=csv, file_name='health_predictions.csv')
 
+            # Class distribution
             st.subheader("Prediction Distribution")
             fig, ax = plt.subplots()
             sns.countplot(x='Prediction', data=batch_df, order=target_le.classes_, ax=ax)
             st.pyplot(fig)
 
+            # Feature distributions
+            st.subheader("Feature Distributions")
+            for feature in ['BMI', 'BP_Systolic', 'Cholesterol_mg_dL']:
+                fig2, ax2 = plt.subplots()
+                sns.histplot(batch_df[feature], kde=True, ax=ax2)
+                ax2.set_title(f"Distribution of {feature}")
+                st.pyplot(fig2)
+
 if __name__ == "__main__":
     main()
+
 
 
 
