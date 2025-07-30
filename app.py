@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Comprehensive Health Status Predictor", layout="wide")
 
@@ -31,21 +32,18 @@ def load_and_prepare_data():
 
 @st.cache_resource(show_spinner=True)
 def train_model(df):
-    # Features to use
     features = [
         'Height_cm', 'Weight_kg', 'BMI', 'BP_Systolic', 'BP_Diastolic', 
         'Cholesterol_mg_dL', 'ActivityLevel', 'DietType', 'HealthScore'
     ]
     target = 'HealthyStatus'
 
-    # Encode categorical features
     encoders = {}
     for col in ['ActivityLevel', 'DietType']:
         le = LabelEncoder()
         df[col] = le.fit_transform(df[col])
         encoders[col] = le
 
-    # Encode target labels
     target_le = LabelEncoder()
     df[target] = target_le.fit_transform(df[target])
     encoders['target'] = target_le
@@ -54,36 +52,53 @@ def train_model(df):
     y = df[target]
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
-
-    # Model evaluation (optional for console logs)
-    y_pred = model.predict(X_test)
-    acc = np.mean(y_pred == y_test)
-    print(f"Validation Accuracy: {acc*100:.2f}%")
-
     return model, encoders, features, target_le
 
 def preprocess_input(input_df, encoders, features):
-    # Encode categorical columns
     for col in encoders:
         if col == 'target':
             continue
         le = encoders[col]
         if col in input_df.columns:
-            # Replace unseen labels with first known in encoder classes
             input_df[col] = input_df[col].apply(lambda x: x if x in le.classes_ else le.classes_[0])
             input_df[col] = le.transform(input_df[col])
         else:
             input_df[col] = le.transform([le.classes_[0]])[0]
 
-    # Add missing numeric columns if any
     for col in features:
         if col not in input_df.columns:
-            input_df[col] = 0  # or could use median or other default
-
+            input_df[col] = 0
     return input_df[features]
+
+def calculate_health_score(height, weight, bp_sys, cholesterol, activity, diet):
+    bmi = weight / ((height / 100) ** 2)
+    score = 100 - (bmi - 22)**2 - abs(bp_sys - 120)/2 - (cholesterol - 180)/5
+    if activity == "Very Active":
+        score += 5
+    elif activity == "Moderately Active":
+        score += 2
+    if diet == "Balanced":
+        score += 3
+    return max(0, min(100, round(score, 1))), round(bmi, 1)
+
+def health_score_gauge(score):
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = score,
+        title = {'text': "Health Score"},
+        gauge = {
+            'axis': {'range': [0,100]},
+            'bar': {'color': "darkblue"},
+            'steps': [
+                {'range': [0,60], 'color': "red"},
+                {'range': [60,80], 'color': "orange"},
+                {'range': [80,100], 'color': "green"}
+            ]
+        }
+    ))
+    return fig
 
 def main():
     st.title("Comprehensive Health Status Predictor")
@@ -100,35 +115,61 @@ def main():
 
     if choice == "Single Prediction":
         st.header("Input health details:")
-
-        input_data = {}
-        for f in features:
-            if f in encoders:
-                options = list(encoders[f].classes_)
-                input_data[f] = st.selectbox(f"{f} (categorical)", options)
-            elif f == 'HealthScore':
-                input_data[f] = st.slider(f"{f}", 0.0, 100.0, 50.0)
-            else:
-                min_val = float(np.floor(df[f].min()))
-                max_val = float(np.ceil(df[f].max()))
-                median_val = float(np.median(df[f]))
-                input_data[f] = st.number_input(f"{f} (numeric)", min_val, max_val, median_val)
+        height = st.number_input("Height (cm)", 100, 220, 170)
+        weight = st.number_input("Weight (kg)", 30, 200, 70)
+        bp_sys = st.number_input("BP Systolic", 80, 200, 120)
+        bp_dia = st.number_input("BP Diastolic", 50, 130, 80)
+        cholesterol = st.number_input("Cholesterol (mg/dL)", 100, 400, 180)
+        activity = st.selectbox("Activity Level", ["Sedentary", "Lightly Active", "Moderately Active", "Very Active"])
+        diet = st.selectbox("Diet Type", ["Balanced", "High Protein", "High Carb", "Keto", "Vegetarian"])
 
         if st.button("Predict"):
+            # Calculate health score & BMI
+            health_score, bmi = calculate_health_score(height, weight, bp_sys, cholesterol, activity, diet)
+
+            input_data = {
+                'Height_cm': height,
+                'Weight_kg': weight,
+                'BMI': bmi,
+                'BP_Systolic': bp_sys,
+                'BP_Diastolic': bp_dia,
+                'Cholesterol_mg_dL': cholesterol,
+                'ActivityLevel': activity,
+                'DietType': diet,
+                'HealthScore': health_score
+            }
             input_df = pd.DataFrame([input_data])
             input_encoded = preprocess_input(input_df, encoders, features)
             pred = model.predict(input_encoded)[0]
             proba = model.predict_proba(input_encoded)[0]
-
             class_name = target_le.inverse_transform([pred])[0]
             prob = proba[pred]
 
-            st.success(f"Prediction: **{class_name}**")
-            st.info(f"Confidence: **{prob:.2%}**")
+            # Color coding
+            if class_name == "Healthy and Fit":
+                color = "green"
+            elif health_score >= 60:
+                color = "orange"
+            else:
+                color = "red"
+
+            # Display prediction with color
+            st.markdown(
+                f"""
+                <div style="background-color:{color};padding:15px;border-radius:10px">
+                    <h3 style="color:white;">Prediction: {class_name}</h3>
+                    <p style="color:white;">Confidence: {prob:.2%}</p>
+                    <p style="color:white;">Your BMI: {bmi}</p>
+                    <p style="color:white;">Your Health Score: {health_score}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            st.plotly_chart(health_score_gauge(health_score))
 
     else:
         st.header("Batch prediction by uploading CSV file")
-
         uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
 
         if uploaded_file:
@@ -139,10 +180,8 @@ def main():
             input_encoded = preprocess_input(batch_df.copy(), encoders, features)
             preds = model.predict(input_encoded)
             probas = model.predict_proba(input_encoded)
-
             pred_labels = target_le.inverse_transform(preds)
             pred_probas = [probas[i][preds[i]] for i in range(len(preds))]
-
             batch_df['Prediction'] = pred_labels
             batch_df['Confidence'] = pred_probas
 
