@@ -23,10 +23,19 @@ def recompute_score(row):
         score += 3
     return max(0, min(100, round(score, 1)))
 
+def categorize_health(score):
+    if score >= 80:
+        return "Healthy and Fit"
+    elif score >= 60:
+        return "Moderate"
+    else:
+        return "Unhealthy and Not Fit"
+
 def prepare_dataset():
     if not os.path.exists("health_tracker_500_clean.csv"):
         df = pd.read_csv("health_tracker_500.csv")
         df['HealthScore'] = df.apply(recompute_score, axis=1)
+        df['HealthyStatus'] = df['HealthScore'].apply(categorize_health)
         df.to_csv("health_tracker_500_clean.csv", index=False)
         print("Clean dataset created: health_tracker_500_clean.csv")
     return pd.read_csv("health_tracker_500_clean.csv")
@@ -35,18 +44,6 @@ def prepare_dataset():
 @st.cache_data(show_spinner=True)
 def load_and_prepare_data():
     df = prepare_dataset()
-    healthy_bmi = ['Normal', 'Underweight']
-    healthy_bp = ['Normal', 'Elevated']
-    healthy_chol = ['Desirable', 'Borderline']
-
-    df['HealthyStatus'] = np.where(
-        (df['BMI_Category'].isin(healthy_bmi)) &
-        (df['BP_Category'].isin(healthy_bp)) &
-        (df['Cholesterol_Category'].isin(healthy_chol)) &
-        (df['HealthScore'] >= 60),
-        'Healthy and Fit',
-        'Unhealthy and Not Fit'
-    )
     return df
 
 @st.cache_resource(show_spinner=True)
@@ -98,6 +95,14 @@ def calculate_health_score(height, weight, bp_sys, cholesterol, activity, diet):
         score += 3
     return max(0, min(100, round(score, 1))), round(bmi, 1)
 
+def categorize_health(score):
+    if score >= 80:
+        return "Healthy and Fit"
+    elif score >= 60:
+        return "Moderate"
+    else:
+        return "Unhealthy and Not Fit"
+
 def health_score_gauge(score):
     fig = go.Figure(go.Indicator(
         mode = "gauge+number",
@@ -119,7 +124,7 @@ def health_score_gauge(score):
 def main():
     st.title("Comprehensive Health Status Predictor")
     st.markdown("""
-        This app predicts if a person is **Healthy and Fit** or **Unhealthy and Not Fit**  
+        This app predicts if a person is **Healthy and Fit**, **Moderate**, or **Unhealthy and Not Fit**  
         using BMI, blood pressure, cholesterol, diet, activity, and an auto‑calculated health score.
     """)
 
@@ -140,6 +145,7 @@ def main():
 
         if st.button("Predict"):
             health_score, bmi = calculate_health_score(height, weight, bp_sys, cholesterol, activity, diet)
+            health_category = categorize_health(health_score)
 
             input_data = {
                 'Height_cm': height,
@@ -160,9 +166,9 @@ def main():
             prob = proba[pred]
 
             # Color coding
-            if class_name == "Healthy and Fit":
+            if health_category == "Healthy and Fit":
                 color = "green"
-            elif health_score >= 60:
+            elif health_category == "Moderate":
                 color = "orange"
             else:
                 color = "red"
@@ -170,7 +176,7 @@ def main():
             st.markdown(
                 f"""
                 <div style="background-color:{color};padding:15px;border-radius:10px">
-                    <h3 style="color:white;">Prediction: {class_name}</h3>
+                    <h3 style="color:white;">Prediction: {health_category}</h3>
                     <p style="color:white;">Confidence: {prob:.2%}</p>
                     <p style="color:white;">Your BMI: {bmi}</p>
                     <p style="color:white;">Your Health Score: {health_score}</p>
@@ -188,13 +194,11 @@ def main():
             st.write("Data preview:")
             st.dataframe(batch_df.head())
 
-            input_encoded = preprocess_input(batch_df.copy(), encoders, features)
-            preds = model.predict(input_encoded)
-            probas = model.predict_proba(input_encoded)
-            pred_labels = target_le.inverse_transform(preds)
-            pred_probas = [probas[i][preds[i]] for i in range(len(preds))]
-            batch_df['Prediction'] = pred_labels
-            batch_df['Confidence'] = pred_probas
+            # Recalculate HealthScore & category for batch
+            batch_df['HealthScore'] = batch_df.apply(
+                lambda row: recompute_score(row), axis=1
+            )
+            batch_df['Prediction'] = batch_df['HealthScore'].apply(categorize_health)
 
             st.subheader("Prediction Results:")
             st.dataframe(batch_df)
@@ -204,11 +208,12 @@ def main():
 
             st.subheader("Prediction Distribution")
             fig, ax = plt.subplots()
-            sns.countplot(x='Prediction', data=batch_df, order=target_le.classes_, ax=ax)
+            sns.countplot(x='Prediction', data=batch_df, order=["Unhealthy and Not Fit","Moderate","Healthy and Fit"], ax=ax)
             st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
+
 
 # ------------------------------------
 # Footer
